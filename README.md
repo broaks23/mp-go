@@ -7,7 +7,7 @@ MpGo is a small Android player for local MP3, MP4 and common audio files. It ope
 1. Open **Library → Add songs**. Choose the root library, an existing playlist or a new playlist, then select files or a folder. Folder import includes subfolders.
 2. Tap a song to play that list from the selected item. Tap **▶** beside a playlist to play it from the beginning.
 3. Use **↑** and **↓** to change the stored order in Library. The same buttons on Player change only the current queue. The queue and playback position are saved between app launches.
-4. Use the square **Stop** button to end playback and remove the media notification. Android keeps an active media notification visible while playback is running; its play/pause, previous and next controls also appear on the lock screen.
+4. Use the square **Stop** button to end playback and remove the media notification. Swiping away the notification also stops and clears the queue when Android allows dismissal. Android keeps an active media notification visible while playback is running; its play/pause, previous and next controls also appear on the lock screen.
 
 MpGo stores playlists, queue and file references in app preferences. It does not copy media into app storage. Android's document picker grants lasting access; moving or deleting a source file can make that entry unplayable.
 
