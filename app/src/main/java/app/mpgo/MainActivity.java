@@ -2,6 +2,7 @@ package app.mpgo;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.os.Build;
 import android.content.Intent;
 import android.database.Cursor;
 import android.graphics.Color;
@@ -12,6 +13,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.DocumentsContract;
+import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -23,6 +25,7 @@ import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
+import androidx.core.content.FileProvider;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.Player;
 import androidx.media3.session.MediaController;
@@ -32,9 +35,10 @@ import com.google.common.util.concurrent.ListenableFuture;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.io.File;
 
 public final class MainActivity extends Activity {
-    private static final int FILES = 11, FOLDER = 12;
+    private static final int FILES = 11, FOLDER = 12, INSTALL_PERMISSION = 13;
     private static final int BG = 0xff0b0b10, PANEL = 0xff1b1b24, WHITE = 0xfff6f5f7;
     private static final int MUTED = 0xffa6a3ad, ACCENT = 0xffff345e;
     private LibraryStore store;
@@ -47,6 +51,10 @@ public final class MainActivity extends Activity {
     private SeekBar seek;
     private TextView elapsed, total, title, subtitle;
     private Button playButton;
+    private UpdateManager.Release availableUpdate;
+    private String updateMessage = "Tap Check updates to search GitHub Releases.";
+    private boolean updateBusy;
+    private File downloadedUpdate;
     private boolean dragging;
     private final Runnable clock = new Runnable() {
         @Override public void run() { updatePlayer(); handler.postDelayed(this, 500); }
@@ -119,18 +127,125 @@ public final class MainActivity extends Activity {
         LinearLayout header = row();
         TextView logo = text("MpGo", 28, WHITE, true);
         header.addView(logo, new LinearLayout.LayoutParams(0, dp(56), 1));
-        TextView section = text(tab.equals("Player") ? "NOW PLAYING" : "YOUR MUSIC", 11, ACCENT, true);
+        TextView section = text(tab.equals("Player") ? "NOW PLAYING" : tab.equals("Library") ? "YOUR MUSIC" : "APP UPDATES", 11, ACCENT, true);
         header.addView(section); root.addView(header);
         ScrollView scroll = new ScrollView(this); scroll.setFillViewport(false);
         body = new LinearLayout(this); body.setOrientation(LinearLayout.VERTICAL);
         scroll.addView(body); root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
-        if (tab.equals("Player")) renderPlayer(); else renderLibrary();
+        if (tab.equals("Player")) renderPlayer(); else if (tab.equals("Library")) renderLibrary(); else renderUpdates();
         space(root, 8);
         LinearLayout nav = row(); nav.setBackground(shape(PANEL, 22)); nav.setPadding(dp(4), dp(4), dp(4), dp(4));
         Button playerTab = button("♫  Player", tab.equals("Player"), v -> { tab = "Player"; render(); });
         Button libraryTab = button("▤  Library", tab.equals("Library"), v -> { tab = "Library"; render(); });
+        Button updatesTab = button("↻  Updates", tab.equals("Updates"), v -> { tab = "Updates"; render(); });
         nav.addView(playerTab, new LinearLayout.LayoutParams(0, dp(52), 1));
-        nav.addView(libraryTab, new LinearLayout.LayoutParams(0, dp(52), 1)); root.addView(nav);
+        nav.addView(libraryTab, new LinearLayout.LayoutParams(0, dp(52), 1));
+        nav.addView(updatesTab, new LinearLayout.LayoutParams(0, dp(52), 1)); root.addView(nav);
+    }
+
+    private void renderUpdates() {
+        space(body, 28);
+        body.addView(text("Updates", 26, WHITE, true)); space(body, 18);
+        LinearLayout card = new LinearLayout(this); card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(18), dp(18), dp(18), dp(18)); card.setBackground(shape(PANEL, 20));
+        card.addView(text("CURRENT VERSION", 12, ACCENT, true)); space(card, 8);
+        card.addView(text("v" + UpdateManager.currentVersion(this), 22, WHITE, true));
+        body.addView(card, lp(-1, -2)); space(body, 22);
+        TextView status = text(updateMessage, 14, MUTED, false);
+        body.addView(status); space(body, 18);
+        String label = updateBusy ? "Working…" : availableUpdate == null ? "Check updates" : "Install update " + availableUpdate.version;
+        Button action = button(label, true, v -> {
+            if (availableUpdate == null) checkUpdates(); else installUpdate();
+        });
+        action.setEnabled(!updateBusy);
+        body.addView(action, lp(-1, 54));
+    }
+
+    private void checkUpdates() {
+        updateBusy = true; updateMessage = "Checking GitHub…"; render();
+        new Thread(() -> {
+            try {
+                UpdateManager.Release latest = UpdateManager.latest();
+                runOnUiThread(() -> {
+                    if (UpdateManager.isNewer(latest.version, UpdateManager.currentVersion(this))) {
+                        availableUpdate = latest;
+                        downloadedUpdate = null;
+                        updateMessage = "Version " + latest.version + " is available.";
+                    } else {
+                        availableUpdate = null;
+                        downloadedUpdate = null;
+                        updateMessage = "You have the latest version (" + latest.version + ").";
+                    }
+                    updateBusy = false; if (tab.equals("Updates")) render();
+                });
+            } catch (Exception error) {
+                runOnUiThread(() -> {
+                    updateBusy = false; availableUpdate = null;
+                    updateMessage = "Could not check updates: " + error.getMessage();
+                    if (tab.equals("Updates")) render();
+                });
+            }
+        }).start();
+    }
+
+    private void installUpdate() {
+        if (availableUpdate == null || updateBusy) return;
+        if (downloadedUpdate != null && downloadedUpdate.exists()) { launchInstaller(downloadedUpdate); return; }
+        UpdateManager.Release release = availableUpdate;
+        updateBusy = true; updateMessage = "Downloading " + release.version + "…"; render();
+        new Thread(() -> {
+            try {
+                File apk = UpdateManager.download(this, release, percent -> runOnUiThread(() -> {
+                    updateMessage = "Downloading " + release.version + "… " + percent + "%";
+                    if (tab.equals("Updates")) render();
+                }));
+                boolean sameSigner = UpdateManager.hasSameSigner(this, apk, release);
+                runOnUiThread(() -> {
+                    updateBusy = false;
+                    if (!sameSigner) {
+                        updateMessage = "This release uses a different signing key. A one-time reinstall is required.";
+                        new AlertDialog.Builder(this).setTitle("One-time reinstall required")
+                                .setMessage("Your installed MpGo uses an older signing key. Android cannot install this update over it. Uninstall the old app, then install the new APK from GitHub. Uninstalling removes saved playlists and queue; your media files stay in their original folders.")
+                                .setPositiveButton("Open release", (d, w) -> startActivity(new Intent(Intent.ACTION_VIEW,
+                                        Uri.parse("https://github.com/broaks23/mp-go/releases/tag/" + release.version))))
+                                .setNegativeButton("Cancel", null).show();
+                    } else {
+                        downloadedUpdate = apk;
+                        updateMessage = "Download ready. Confirm installation in Android.";
+                        launchInstaller(apk);
+                    }
+                    if (tab.equals("Updates")) render();
+                });
+            } catch (Exception error) {
+                runOnUiThread(() -> {
+                    updateBusy = false;
+                    updateMessage = "Could not install update: " + error.getMessage();
+                    if (tab.equals("Updates")) render();
+                });
+            }
+        }).start();
+    }
+
+    private void launchInstaller(File apk) {
+        if (Build.VERSION.SDK_INT >= 26 && !getPackageManager().canRequestPackageInstalls()) {
+            updateMessage = "Allow MpGo to install apps, then return to finish.";
+            Intent settings = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:" + getPackageName()));
+            try { startActivityForResult(settings, INSTALL_PERMISSION); }
+            catch (Exception e) { updateMessage = "Open Android settings and allow installs from MpGo."; }
+            if (tab.equals("Updates")) render();
+            return;
+        }
+        try {
+            Uri uri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", apk);
+            Intent install = new Intent(Intent.ACTION_VIEW);
+            install.setDataAndType(uri, "application/vnd.android.package-archive");
+            install.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(install);
+        } catch (Exception e) {
+            updateMessage = "Android could not open the installer: " + e.getMessage();
+            if (tab.equals("Updates")) render();
+        }
     }
 
     private void renderPlayer() {
@@ -304,6 +419,13 @@ public final class MainActivity extends Activity {
     }
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if (request == INSTALL_PERMISSION) {
+            if (downloadedUpdate != null && downloadedUpdate.exists() &&
+                    (Build.VERSION.SDK_INT < 26 || getPackageManager().canRequestPackageInstalls()))
+                launchInstaller(downloadedUpdate);
+            else { updateMessage = "Install permission is needed to finish the update."; if (tab.equals("Updates")) render(); }
+            return;
+        }
         if (result != RESULT_OK || data == null) return;
         String target = importTarget;
         if (request == FOLDER && data.getData() != null) {

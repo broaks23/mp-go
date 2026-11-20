@@ -1,31 +1,20 @@
 # MpGo
 
-MpGo is a small Android player for local MP3, MP4 and common audio files. It opens on the Player tab, with Library at the bottom. An MP4 video is shown in the player while the app is open; audio continues when the app is in the background or the screen is locked.
+MpGo plays local MP3, MP4 and common audio files on Android 7.0 and newer. It opens on Player; Library holds songs and playlists without copying the media files. Playback continues in the background and on the lock screen.
 
 ## Use
 
-1. Open **Library → Add songs**. Choose the root library, an existing playlist or a new playlist, then select files or a folder. Folder import includes subfolders.
-2. Tap a song to play that list from the selected item. Tap **▶** beside a playlist to play it from the beginning.
-3. Use **↑** and **↓** to change the stored order in Library. The same buttons on Player change only the current queue. The queue and playback position are saved between app launches.
-4. Use the square **Stop** button to end playback and remove the media notification. Swiping away the notification also stops and clears the queue when Android allows dismissal. Android keeps an active media notification visible while playback is running; its play/pause, previous and next controls also appear on the lock screen.
+1. Open **Library → Add songs**. Choose the root library, a playlist or a new playlist, then select files or a folder. Folder import includes subfolders.
+2. Tap a song to play its list from that item, or tap **▶** beside a playlist to play it from the beginning.
+3. Use **↑** and **↓** in Library to change a stored list. The same buttons in Player reorder only the current queue. MpGo saves the queue and playback position.
+4. Open **Updates** to see the installed version. Tap **Check updates** to query the public GitHub Releases API. If a newer release has an APK, tap **Install update vX.Y.Z** to download it and open Android's installer. Internet access and Android's permission to install apps from MpGo are required.
 
-MpGo stores playlists, queue and file references in app preferences. It does not copy media into app storage. Android's document picker grants lasting access; moving or deleting a source file can make that entry unplayable.
+The installer checks the APK's package, version and signing certificate. Android asks you to confirm installation. MpGo does not install silently.
 
-## GitHub build and release
+## Builds and releases
 
-The [Android workflow](.github/workflows/android.yml) runs on every push to `main` and can be started manually. Each run uploads an installable `MpGo-debug-apk` artifact under **Actions → run → Artifacts**. Pushing a tag such as `v1.0.0` also creates a GitHub Release with the APK attached.
+The [GitHub Actions workflow](.github/workflows/android.yml) builds a signed APK on every push to `main`, uploads it as an Actions artifact, and attaches it to a GitHub Release when a `vX.Y.Z` tag is pushed. A release tag must match `versionName` in [app/build.gradle](app/build.gradle); increase `versionCode` for each new version. The computer pushing code does not need Android tools.
 
-```bash
-git init
-git add .
-git commit -m "Build MpGo Android player"
-git branch -M main
-git remote add origin <your-github-repository-url>
-git push -u origin main
-git tag v1.0.0
-git push origin v1.0.0
-```
+Releases from `v1.1.0` onward use one signing key stored in GitHub Actions secrets. The local backup is in the ignored `.signing/` folder; back up that folder securely because GitHub secrets cannot be read back. The public certificate SHA-256 fingerprint is `418B3E57AF86D7A91FCB0DA178AE99F19C4CFA1F845C81D89BDC3C60E6FB00DC`.
 
-The workflow uses a debug signing key generated on each runner. Android may require uninstalling a previous CI APK before installing one from a later run. For seamless upgrades, replace debug signing with a private release signing key stored in GitHub Actions secrets.
-
-The project targets Android 7.0 and newer. No Android SDK is needed on your computer; GitHub Actions installs the SDK and Gradle.
+**One-time migration:** `v1.0.0` and `v1.0.1` were built with temporary debug keys. Android cannot upgrade those APKs in place to `v1.1.0`. Uninstall the old app before installing the new release; this removes saved playlists and queue, but it does not remove the media files in their original folders. Later releases signed with the same key can install over `v1.1.0` and keep app data.
