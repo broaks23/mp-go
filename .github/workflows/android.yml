@@ -23,8 +23,10 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
+      - name: Check Maven Central access
+        run: curl --fail --silent --show-error --location --output /dev/null --write-out 'Maven Central HTTP %{http_code}\n' https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-stdlib/2.1.20/kotlin-stdlib-2.1.20.pom
       - name: Build APK
-        run: gradle --no-daemon :app:assembleDebug
+        run: gradle --no-daemon :app:assembleDebug --info
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
