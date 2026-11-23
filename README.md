@@ -6,8 +6,9 @@ MpGo plays local MP3, MP4 and common audio files on Android 7.0 and newer. It op
 
 1. Open **Library → Add songs**. Choose the root library, a playlist or a new playlist, then select files or a folder. Folder import includes subfolders.
 2. Tap a song to play its list from that item, or tap **▶** beside a playlist to play it from the beginning.
-3. Use **↑** and **↓** in Library to change a stored list. The same buttons in Player reorder only the current queue. MpGo saves the queue and playback position.
-4. Open **Updates** to see the installed version. Tap **Check updates** to query the public GitHub Releases API. If a newer release has an APK, tap **Install update vX.Y.Z** to download it and open Android's installer. Internet access and Android's permission to install apps from MpGo are required.
+3. Hold a song or playlist row, then drag and drop it to change the order. Reordering in Player changes only the current queue. MpGo saves the queue and playback position.
+4. Tap **⋮** beside a song for **Play next** or to remove it from the current list. Playlist menus offer **Shuffle playlist**, **Rename** and **Remove playlist**. Removing a list entry leaves the media file on your device.
+5. Open **Updates** to see the installed version. Tap **Check updates** to query the public GitHub Releases API. If a newer release has an APK, tap **Install update vX.Y.Z** to download it and open Android's installer. Internet access and Android's permission to install apps from MpGo are required.
 
 The installer checks the APK's package, version and signing certificate. Android asks you to confirm installation. MpGo does not install silently.
 

@@ -68,6 +68,36 @@ final class LibraryStore {
         put(p, "id", id); put(p, "name", name.trim()); put(p, "items", new JSONArray());
         array("playlists").put(p); save(); return id;
     }
+    synchronized void renamePlaylist(String id, String name) {
+        if (name == null || name.trim().isEmpty()) return;
+        JSONArray playlists = array("playlists");
+        for (int i = 0; i < playlists.length(); i++) {
+            JSONObject playlist = playlists.optJSONObject(i);
+            if (playlist != null && id.equals(playlist.optString("id"))) {
+                put(playlist, "name", name.trim()); save(); return;
+            }
+        }
+    }
+    synchronized void removePlaylist(String id) {
+        JSONArray playlists = array("playlists");
+        for (int i = 0; i < playlists.length(); i++) {
+            JSONObject playlist = playlists.optJSONObject(i);
+            if (playlist != null && id.equals(playlist.optString("id"))) {
+                playlists.remove(i); save(); return;
+            }
+        }
+    }
+    synchronized void movePlaylist(int from, int to) {
+        JSONArray playlists = array("playlists");
+        if (from < 0 || to < 0 || from >= playlists.length() || to >= playlists.length() || from == to) return;
+        List<JSONObject> reordered = new ArrayList<>();
+        for (int i = 0; i < playlists.length(); i++) reordered.add(playlists.optJSONObject(i));
+        JSONObject selected = reordered.remove(from);
+        reordered.add(to, selected);
+        JSONArray next = new JSONArray();
+        for (JSONObject playlist : reordered) next.put(playlist);
+        put(data, "playlists", next); save();
+    }
     synchronized Song song(String id) {
         JSONArray songs = array("songs");
         for (int i = 0; i < songs.length(); i++) {
@@ -115,6 +145,12 @@ final class LibraryStore {
             if (p != null && playlistId.equals(p.optString("id"))) put(p, "items", next);
         }
         save();
+    }
+    synchronized void removeSong(String playlistId, String songId) {
+        JSONArray ids = entries(playlistId);
+        for (int i = 0; i < ids.length(); i++) {
+            if (songId.equals(ids.optString(i))) { ids.remove(i); save(); return; }
+        }
     }
     synchronized List<String> queueIds() { return strings(array("queue")); }
     synchronized int queueIndex() { return data.optInt("queueIndex", 0); }

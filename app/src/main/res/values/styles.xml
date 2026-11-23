@@ -1,0 +1,13 @@
+<resources>
+    <style name="MpGoTheme" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:colorAccent">#37D477</item>
+        <item name="android:windowBackground">#0B100D</item>
+        <item name="android:dialogTheme">@style/MpGoDialogTheme</item>
+    </style>
+    <style name="MpGoDialogTheme" parent="android:style/Theme.Material.Dialog.Alert">
+        <item name="android:colorAccent">#37D477</item>
+        <item name="android:windowBackground">@drawable/dialog_background</item>
+        <item name="android:textColorPrimary">#F2F8F3</item>
+        <item name="android:textColorSecondary">#A7B7AB</item>
+    </style>
+</resources>

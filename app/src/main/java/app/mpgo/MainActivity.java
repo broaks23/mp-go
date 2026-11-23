@@ -2,12 +2,14 @@ package app.mpgo;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.ClipData;
 import android.os.Build;
 import android.content.Intent;
 import android.database.Cursor;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
@@ -15,12 +17,15 @@ import android.os.Looper;
 import android.provider.DocumentsContract;
 import android.provider.Settings;
 import android.view.Gravity;
+import android.view.DragEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.PopupMenu;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.TextView;
@@ -33,20 +38,22 @@ import androidx.media3.session.SessionToken;
 import androidx.media3.ui.PlayerView;
 import com.google.common.util.concurrent.ListenableFuture;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.io.File;
 
 public final class MainActivity extends Activity {
     private static final int FILES = 11, FOLDER = 12, INSTALL_PERMISSION = 13;
-    private static final int BG = 0xff0b0b10, PANEL = 0xff1b1b24, WHITE = 0xfff6f5f7;
-    private static final int MUTED = 0xffa6a3ad, ACCENT = 0xffff345e;
+    private static final int BG = 0xff0b100d, PANEL = 0xff19231c, WHITE = 0xfff2f8f3;
+    private static final int MUTED = 0xffa7b7ab, ACCENT = 0xff37d477, HOVER = 0xff294934;
     private LibraryStore store;
     private MediaController controller;
     private ListenableFuture<MediaController> controllerFuture;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private String tab = "Player", playlistId, importTarget;
     private LinearLayout body, root;
+    private ScrollView listScroll;
     private PlayerView playerView;
     private SeekBar seek;
     private TextView elapsed, total, title, subtitle;
@@ -56,6 +63,14 @@ public final class MainActivity extends Activity {
     private boolean updateBusy;
     private File downloadedUpdate;
     private boolean dragging;
+    private interface MoveAction { void move(int from, int to); }
+    private interface ChoiceAction { void choose(int which); }
+    private interface NameAction { void accept(String value); }
+    private static final class DragEntry {
+        final String scope; final int index;
+        boolean dropped;
+        DragEntry(String scope, int index) { this.scope = scope; this.index = index; }
+    }
     private final Runnable clock = new Runnable() {
         @Override public void run() { updatePlayer(); handler.postDelayed(this, 500); }
     };
@@ -107,7 +122,11 @@ public final class MainActivity extends Activity {
     }
     private Button button(String value, boolean primary, View.OnClickListener click) {
         Button b = new Button(this); b.setText(value); b.setTextSize(14); b.setAllCaps(false);
-        b.setTextColor(WHITE); b.setBackground(shape(primary ? ACCENT : PANEL, 18));
+        b.setTextColor(primary ? BG : WHITE);
+        b.setBackground(new RippleDrawable(android.content.res.ColorStateList.valueOf(primary ? 0x55000000 : 0x6637d477),
+                shape(primary ? ACCENT : PANEL, 18), null));
+        b.setMinWidth(0); b.setMinimumWidth(0); b.setMinHeight(0); b.setMinimumHeight(0);
+        b.setPadding(dp(10), 0, dp(10), 0);
         b.setOnClickListener(click); return b;
     }
     private LinearLayout row() {
@@ -118,6 +137,20 @@ public final class MainActivity extends Activity {
         return new LinearLayout.LayoutParams(width < 0 ? width : dp(width), height < 0 ? height : dp(height));
     }
     private void space(LinearLayout box, int height) { box.addView(new View(this), lp(1, height)); }
+    private void renderKeepingScroll() {
+        int oldY = listScroll == null ? 0 : listScroll.getScrollY();
+        render();
+        ScrollView current = listScroll;
+        if (current != null) current.post(() -> current.scrollTo(0, oldY));
+    }
+    private void addWeighted(LinearLayout box, View view, int height, int margin) {
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, dp(height), 1);
+        p.setMargins(dp(margin), 0, dp(margin), 0); box.addView(view, p);
+    }
+    private LinearLayout cardRow(int color) {
+        LinearLayout line = row(); line.setBackground(shape(color, 16));
+        line.setPadding(dp(12), dp(4), dp(8), dp(4)); return line;
+    }
 
     private void render() {
         if (playerView != null) { playerView.setPlayer(null); playerView = null; }
@@ -130,6 +163,7 @@ public final class MainActivity extends Activity {
         TextView section = text(tab.equals("Player") ? "NOW PLAYING" : tab.equals("Library") ? "YOUR MUSIC" : "APP UPDATES", 11, ACCENT, true);
         header.addView(section); root.addView(header);
         ScrollView scroll = new ScrollView(this); scroll.setFillViewport(false);
+        listScroll = scroll;
         body = new LinearLayout(this); body.setOrientation(LinearLayout.VERTICAL);
         scroll.addView(body); root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
         if (tab.equals("Player")) renderPlayer(); else if (tab.equals("Library")) renderLibrary(); else renderUpdates();
@@ -138,9 +172,9 @@ public final class MainActivity extends Activity {
         Button playerTab = button("♫  Player", tab.equals("Player"), v -> { tab = "Player"; render(); });
         Button libraryTab = button("▤  Library", tab.equals("Library"), v -> { tab = "Library"; render(); });
         Button updatesTab = button("↻  Updates", tab.equals("Updates"), v -> { tab = "Updates"; render(); });
-        nav.addView(playerTab, new LinearLayout.LayoutParams(0, dp(52), 1));
-        nav.addView(libraryTab, new LinearLayout.LayoutParams(0, dp(52), 1));
-        nav.addView(updatesTab, new LinearLayout.LayoutParams(0, dp(52), 1)); root.addView(nav);
+        addWeighted(nav, playerTab, 52, 3);
+        addWeighted(nav, libraryTab, 52, 3);
+        addWeighted(nav, updatesTab, 52, 3); root.addView(nav);
     }
 
     private void renderUpdates() {
@@ -250,9 +284,11 @@ public final class MainActivity extends Activity {
 
     private void renderPlayer() {
         FrameLayout artwork = new FrameLayout(this); artwork.setBackground(shape(PANEL, 24));
-        TextView note = text("♫", 112, 0xff474450, true); note.setGravity(Gravity.CENTER);
+        TextView note = text("♫", 112, 0xff42654b, true); note.setGravity(Gravity.CENTER);
         artwork.addView(note, new FrameLayout.LayoutParams(-1, -1));
         playerView = new PlayerView(this); playerView.setUseController(false); playerView.setBackgroundColor(Color.TRANSPARENT);
+        playerView.setShutterBackgroundColor(Color.TRANSPARENT);
+        playerView.setDefaultArtwork(getDrawable(R.drawable.mpgo_icon));
         playerView.setPlayer(controller);
         artwork.addView(playerView, new FrameLayout.LayoutParams(-1, -1));
         body.addView(artwork, lp(-1, 240)); space(body, 22);
@@ -283,12 +319,13 @@ public final class MainActivity extends Activity {
             controller.stop(); controller.clearMediaItems();
             store.setQueue(new ArrayList<>(), 0); render();
         });
-        controls.addView(prev, new LinearLayout.LayoutParams(0, dp(56), 1));
-        controls.addView(playButton, new LinearLayout.LayoutParams(0, dp(64), 1));
-        controls.addView(next, new LinearLayout.LayoutParams(0, dp(56), 1));
-        controls.addView(stop, new LinearLayout.LayoutParams(0, dp(56), 1));
+        addWeighted(controls, prev, 56, 4);
+        addWeighted(controls, playButton, 64, 4);
+        addWeighted(controls, next, 56, 4);
+        addWeighted(controls, stop, 56, 4);
         body.addView(controls); space(body, 26);
-        body.addView(text("UP NEXT", 12, ACCENT, true)); space(body, 8);
+        body.addView(text("UP NEXT", 12, ACCENT, true)); space(body, 4);
+        body.addView(text("Hold and drag a song to change play order", 12, MUTED, false)); space(body, 10);
         if (controller == null || controller.getMediaItemCount() == 0) {
             body.addView(text("Your play queue will appear here.", 14, MUTED, false));
         } else {
@@ -296,14 +333,16 @@ public final class MainActivity extends Activity {
                 final int index = i;
                 MediaItem item = controller.getMediaItemAt(i);
                 String name = item.mediaMetadata.title == null ? "Untitled" : item.mediaMetadata.title.toString();
-                LinearLayout line = row(); line.setBackground(shape(i == controller.getCurrentMediaItemIndex() ? 0xff35212c : PANEL, 14));
-                line.setPadding(dp(8), dp(3), dp(8), dp(3));
-                TextView label = text((i + 1) + ".  " + name, 14, WHITE, false);
-                line.addView(label, new LinearLayout.LayoutParams(0, dp(48), 1));
+                int color = i == controller.getCurrentMediaItemIndex() ? HOVER : PANEL;
+                LinearLayout line = cardRow(color);
+                TextView label = text("≡   " + (i + 1) + ".  " + name, 14, WHITE, false);
+                label.setSingleLine(true); label.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                line.addView(label, new LinearLayout.LayoutParams(0, dp(54), 1));
                 label.setOnClickListener(v -> controller.seekToDefaultPosition(index));
-                if (i > 0) line.addView(small("↑", v -> controller.moveMediaItem(index, index - 1)));
-                if (i < controller.getMediaItemCount() - 1) line.addView(small("↓", v -> controller.moveMediaItem(index, index + 1)));
-                body.addView(line); space(body, 5);
+                line.addView(more(v -> showQueueMenu(v, index, item)));
+                bindDrag(line, label, "queue", index, color,
+                        (from, to) -> { if (controller != null) controller.moveMediaItem(from, to); });
+                body.addView(line); space(body, 8);
             }
         }
         updatePlayer();
@@ -311,8 +350,54 @@ public final class MainActivity extends Activity {
 
     private Button small(String label, View.OnClickListener action) {
         Button b = button(label, false, action); b.setMinWidth(0); b.setMinimumWidth(0);
-        b.setPadding(0, 0, 0, 0); b.setTextSize(18); b.setTextColor(ACCENT);
-        b.setLayoutParams(lp(38, 38)); return b;
+        b.setPadding(0, 0, 0, 0); b.setTextSize(20); b.setTextColor(ACCENT);
+        b.setLayoutParams(lp(44, 44)); return b;
+    }
+    private Button more(View.OnClickListener action) {
+        Button button = small("⋮", action);
+        button.setContentDescription("More options");
+        return button;
+    }
+    private void bindDrag(LinearLayout row, TextView label, String scope, int index,
+                          int normalColor, MoveAction action) {
+        View.OnLongClickListener start = view -> row.startDragAndDrop(
+                ClipData.newPlainText("MpGo item", scope), new View.DragShadowBuilder(row),
+                new DragEntry(scope, index), 0);
+        row.setOnLongClickListener(start);
+        label.setOnLongClickListener(start);
+        label.setContentDescription(label.getText() + ". Hold and drag to reorder");
+        View.OnDragListener drop = (view, event) -> {
+            if (!(event.getLocalState() instanceof DragEntry)) return false;
+            DragEntry item = (DragEntry) event.getLocalState();
+            if (!scope.equals(item.scope)) return false;
+            switch (event.getAction()) {
+                case DragEvent.ACTION_DRAG_STARTED: return true;
+                case DragEvent.ACTION_DRAG_ENTERED:
+                    if (item.index != index) row.setBackground(shape(HOVER, 16));
+                    return true;
+                case DragEvent.ACTION_DRAG_LOCATION:
+                    autoScroll(view, event.getY()); return true;
+                case DragEvent.ACTION_DRAG_EXITED:
+                case DragEvent.ACTION_DRAG_ENDED:
+                    row.setBackground(shape(normalColor, 16)); return true;
+                case DragEvent.ACTION_DROP:
+                    if (!item.dropped && item.index != index) {
+                        item.dropped = true; action.move(item.index, index); renderKeepingScroll();
+                    }
+                    return true;
+                default: return true;
+            }
+        };
+        row.setOnDragListener(drop);
+        label.setOnDragListener(drop);
+    }
+    private void autoScroll(View target, float localY) {
+        if (listScroll == null) return;
+        int[] scrollAt = new int[2], rowAt = new int[2];
+        listScroll.getLocationOnScreen(scrollAt); target.getLocationOnScreen(rowAt);
+        float y = rowAt[1] + localY;
+        if (y < scrollAt[1] + dp(60)) listScroll.scrollBy(0, -dp(18));
+        else if (y > scrollAt[1] + listScroll.getHeight() - dp(60)) listScroll.scrollBy(0, dp(18));
     }
     private void updatePlayer() {
         if (!tab.equals("Player") || title == null || controller == null) return;
@@ -333,80 +418,207 @@ public final class MainActivity extends Activity {
     private void renderLibrary() {
         LinearLayout heading = row();
         if (playlistId != null) {
-            Button back = small("‹", v -> { playlistId = null; render(); }); heading.addView(back);
+            Button back = small("‹", v -> { playlistId = null; render(); });
+            heading.addView(back); heading.addView(new View(this), lp(8, 1));
         }
         String name = playlistId == null ? "Library" : playlistName(playlistId);
         heading.addView(text(name, 23, WHITE, true), new LinearLayout.LayoutParams(0, dp(55), 1));
+        if (playlistId != null) {
+            String currentId = playlistId;
+            heading.addView(more(v -> showPlaylistMenu(v, currentId)));
+        }
         body.addView(heading);
+        space(body, 8);
         LinearLayout actions = row();
         Button add = button("+ Add songs", true, v -> chooseTarget());
-        actions.addView(add, new LinearLayout.LayoutParams(0, dp(48), 1));
+        addWeighted(actions, add, 52, 4);
         if (playlistId == null) {
             Button create = button("New playlist", false, v -> createPlaylist(null));
-            actions.addView(create, new LinearLayout.LayoutParams(0, dp(48), 1));
+            addWeighted(actions, create, 52, 4);
         }
-        body.addView(actions); space(body, 18);
+        body.addView(actions); space(body, 22);
         if (playlistId == null) {
-            body.addView(text("PLAYLISTS", 12, ACCENT, true)); space(body, 8);
-            for (LibraryStore.Playlist p : store.playlists()) {
-                LinearLayout line = row(); line.setBackground(shape(PANEL, 14)); line.setPadding(dp(10), dp(4), dp(8), dp(4));
-                TextView label = text("▤  " + p.name + "  ·  " + store.list(p.id).size() + " songs", 15, WHITE, true);
-                line.addView(label, new LinearLayout.LayoutParams(0, dp(55), 1));
+            body.addView(text("PLAYLISTS", 12, ACCENT, true)); space(body, 3);
+            body.addView(text("Hold and drag to reorder", 12, MUTED, false)); space(body, 10);
+            List<LibraryStore.Playlist> playlists = store.playlists();
+            if (playlists.isEmpty()) body.addView(text("Create a playlist to organize your music.", 14, MUTED, false));
+            for (int i = 0; i < playlists.size(); i++) {
+                final int index = i;
+                LibraryStore.Playlist p = playlists.get(i);
+                LinearLayout line = cardRow(PANEL);
+                TextView label = text("≡  ▤  " + p.name + "  ·  " + store.list(p.id).size() + " songs", 15, WHITE, true);
+                label.setSingleLine(true); label.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                line.addView(label, new LinearLayout.LayoutParams(0, dp(58), 1));
                 label.setOnClickListener(v -> { playlistId = p.id; render(); });
                 line.addView(small("▶", v -> startList(p.id, 0)));
-                body.addView(line); space(body, 6);
+                line.addView(more(v -> showPlaylistMenu(v, p.id)));
+                bindDrag(line, label, "playlists", index, PANEL,
+                        (from, to) -> store.movePlaylist(from, to));
+                body.addView(line); space(body, 8);
             }
-            space(body, 14); body.addView(text("SONGS", 12, ACCENT, true)); space(body, 8);
+            space(body, 16); body.addView(text("SONGS", 12, ACCENT, true));
         } else {
             Button playAll = button("▶  Play playlist", false, v -> startList(playlistId, 0));
-            body.addView(playAll, lp(-1, 48)); space(body, 14);
+            body.addView(playAll, lp(-1, 52)); space(body, 20);
+            body.addView(text("SONGS", 12, ACCENT, true));
         }
+        space(body, 3); body.addView(text("Hold and drag to reorder", 12, MUTED, false)); space(body, 10);
         List<LibraryStore.Song> songs = store.list(playlistId);
         if (songs.isEmpty()) body.addView(text("No songs yet. Tap Add songs to choose files or a folder.", 14, MUTED, false));
         for (int i = 0; i < songs.size(); i++) {
             final int index = i;
-            LinearLayout line = row(); line.setBackground(shape(PANEL, 14)); line.setPadding(dp(10), dp(4), dp(8), dp(4));
-            TextView label = text("♫  " + songs.get(i).title, 15, WHITE, false);
+            LibraryStore.Song song = songs.get(i);
+            LinearLayout line = cardRow(PANEL);
+            TextView label = text("≡  ♫  " + song.title, 15, WHITE, false);
             label.setSingleLine(true); label.setEllipsize(android.text.TextUtils.TruncateAt.END);
             label.setOnClickListener(v -> startList(playlistId, index));
-            line.addView(label, new LinearLayout.LayoutParams(0, dp(52), 1));
-            if (i > 0) line.addView(small("↑", v -> { store.move(playlistId, index, index - 1); render(); }));
-            if (i < songs.size() - 1) line.addView(small("↓", v -> { store.move(playlistId, index, index + 1); render(); }));
-            body.addView(line); space(body, 5);
+            line.addView(label, new LinearLayout.LayoutParams(0, dp(56), 1));
+            String listId = playlistId;
+            line.addView(more(v -> showSongMenu(v, listId, song)));
+            bindDrag(line, label, "songs:" + (listId == null ? "root" : listId), index, PANEL,
+                    (from, to) -> store.move(listId, from, to));
+            body.addView(line); space(body, 8);
         }
     }
     private String playlistName(String id) {
         for (LibraryStore.Playlist p : store.playlists()) if (p.id.equals(id)) return p.name;
         return "Playlist";
     }
+    private void showSongMenu(View anchor, String listId, LibraryStore.Song song) {
+        PopupMenu menu = new PopupMenu(this, anchor);
+        menu.getMenu().add(0, 1, 0, "Play next");
+        menu.getMenu().add(0, 2, 1, listId == null ? "Remove from library" : "Remove from playlist");
+        menu.setOnMenuItemClickListener(item -> {
+            if (item.getItemId() == 1) playNext(song.mediaItem());
+            else { store.removeSong(listId, song.id); renderKeepingScroll(); toast("Removed from list"); }
+            return true;
+        });
+        menu.show();
+    }
+    private void showQueueMenu(View anchor, int index, MediaItem mediaItem) {
+        PopupMenu menu = new PopupMenu(this, anchor);
+        menu.getMenu().add(0, 1, 0, "Play next");
+        menu.getMenu().add(0, 2, 1, "Remove from queue");
+        menu.setOnMenuItemClickListener(item -> {
+            if (controller == null) return true;
+            if (item.getItemId() == 1) playNext(mediaItem);
+            else controller.removeMediaItem(index);
+            return true;
+        });
+        menu.show();
+    }
+    private void showPlaylistMenu(View anchor, String id) {
+        PopupMenu menu = new PopupMenu(this, anchor);
+        menu.getMenu().add(0, 1, 0, "Shuffle playlist");
+        menu.getMenu().add(0, 2, 1, "Rename");
+        menu.getMenu().add(0, 3, 2, "Remove playlist");
+        menu.setOnMenuItemClickListener(item -> {
+            if (item.getItemId() == 1) {
+                List<LibraryStore.Song> shuffled = new ArrayList<>(store.list(id));
+                Collections.shuffle(shuffled); startSongs(shuffled, 0);
+            } else if (item.getItemId() == 2) {
+                promptPlaylistName("Rename playlist", playlistName(id), "Save", value -> {
+                    store.renamePlaylist(id, value); render();
+                });
+            } else {
+                new AlertDialog.Builder(this, R.style.MpGoDialogTheme)
+                        .setTitle("Remove playlist?")
+                        .setMessage("The songs stay on your device and in any other lists.")
+                        .setNegativeButton("Cancel", null)
+                        .setPositiveButton("Remove", (dialog, which) -> {
+                            store.removePlaylist(id);
+                            if (id.equals(playlistId)) playlistId = null;
+                            render();
+                        }).show();
+            }
+            return true;
+        });
+        menu.show();
+    }
+    private void playNext(MediaItem mediaItem) {
+        if (controller == null) { toast("Player is connecting…"); return; }
+        if (controller.getMediaItemCount() == 0) {
+            controller.setMediaItem(mediaItem); controller.prepare(); controller.play();
+            tab = "Player"; render();
+        } else {
+            int next = Math.max(0, controller.getCurrentMediaItemIndex() + 1);
+            controller.addMediaItem(next, mediaItem);
+            toast("Added to play next");
+        }
+    }
     private void createPlaylist(Runnable after) {
-        EditText field = new EditText(this); field.setSingleLine(true); field.setHint("Playlist name");
-        new AlertDialog.Builder(this).setTitle("New playlist").setView(field)
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton("Create", (d, w) -> {
-                    String name = field.getText().toString().trim();
-                    if (name.isEmpty()) { toast("Enter a playlist name"); return; }
-                    importTarget = store.createPlaylist(name);
-                    if (after != null) after.run(); else render();
-                }).show();
+        promptPlaylistName("New playlist", "", "Create", name -> {
+            importTarget = store.createPlaylist(name);
+            playlistId = importTarget;
+            render();
+            if (after != null) after.run();
+        });
+    }
+    private void promptPlaylistName(String title, String initial, String actionLabel, NameAction action) {
+        LinearLayout form = new LinearLayout(this); form.setOrientation(LinearLayout.VERTICAL);
+        form.setPadding(dp(20), dp(8), dp(20), dp(12));
+        form.addView(text("PLAYLIST NAME", 12, ACCENT, true)); space(form, 9);
+        EditText field = new EditText(this);
+        field.setSingleLine(true); field.setTextSize(16); field.setTextColor(WHITE);
+        field.setHintTextColor(MUTED); field.setHint("Give it a name");
+        field.setPadding(dp(16), 0, dp(16), 0);
+        field.setBackground(shape(0xff26382b, 12));
+        field.setText(initial); field.setSelection(field.length());
+        form.addView(field, lp(-1, 54));
+        AlertDialog dialog = new AlertDialog.Builder(this, R.style.MpGoDialogTheme)
+                .setTitle(title).setView(form)
+                .setNegativeButton("Cancel", null).setPositiveButton(actionLabel, null).create();
+        dialog.setOnShowListener(ignored -> {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
+                String value = field.getText().toString().trim();
+                if (value.isEmpty()) { field.setError("Enter a name"); return; }
+                dialog.dismiss(); action.accept(value);
+            });
+            field.requestFocus();
+            dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
+        });
+        dialog.show();
+    }
+    private void showChoices(String title, List<String> options, ChoiceAction action) {
+        LinearLayout items = new LinearLayout(this); items.setOrientation(LinearLayout.VERTICAL);
+        items.setPadding(dp(18), dp(8), dp(18), dp(12));
+        ScrollView scroll = new ScrollView(this); scroll.addView(items);
+        AlertDialog dialog = new AlertDialog.Builder(this, R.style.MpGoDialogTheme)
+                .setTitle(title).setView(scroll).setNegativeButton("Cancel", null).create();
+        for (int i = 0; i < options.size(); i++) {
+            final int index = i;
+            TextView option = text(options.get(i), 16, WHITE, false);
+            option.setPadding(dp(16), 0, dp(12), 0);
+            option.setBackground(new RippleDrawable(android.content.res.ColorStateList.valueOf(0x6637d477),
+                    shape(0xff26382b, 14), null));
+            LinearLayout.LayoutParams params = lp(-1, 54); params.bottomMargin = dp(8);
+            items.addView(option, params);
+            option.setOnClickListener(view -> { dialog.dismiss(); action.choose(index); });
+        }
+        dialog.show();
     }
     private void chooseTarget() {
         List<LibraryStore.Playlist> ps = store.playlists();
-        List<String> choices = new ArrayList<>();
-        choices.add("Library (root)");
-        for (LibraryStore.Playlist p : ps) choices.add(p.name);
-        choices.add("+ New playlist");
-        int selected = 0;
-        if (playlistId != null) for (int i = 0; i < ps.size(); i++) if (playlistId.equals(ps.get(i).id)) selected = i + 1;
-        new AlertDialog.Builder(this).setTitle("Add songs to").setSingleChoiceItems(choices.toArray(new String[0]), selected, (dialog, which) -> {
-            dialog.dismiss();
+        List<String> choices = new ArrayList<>(), targets = new ArrayList<>();
+        if (playlistId != null) {
+            choices.add("Current playlist  ·  " + playlistName(playlistId)); targets.add(playlistId);
+        }
+        choices.add("Library  ·  all songs"); targets.add(null);
+        for (LibraryStore.Playlist playlist : ps) {
+            if (!playlist.id.equals(playlistId)) {
+                choices.add("▤  " + playlist.name); targets.add(playlist.id);
+            }
+        }
+        choices.add("+  Create new playlist");
+        showChoices("Add songs to", choices, which -> {
             if (which == choices.size() - 1) createPlaylist(this::chooseSource);
-            else { importTarget = which == 0 ? null : ps.get(which - 1).id; chooseSource(); }
-        }).setNegativeButton("Cancel", null).show();
+            else { importTarget = targets.get(which); chooseSource(); }
+        });
     }
     private void chooseSource() {
-        new AlertDialog.Builder(this).setTitle("Choose source")
-                .setItems(new String[]{"Select files", "Select folder (includes subfolders)"}, (d, which) -> {
+        List<String> sources = new ArrayList<>();
+        sources.add("♫  Select files"); sources.add("▤  Select folder and subfolders");
+        showChoices("Choose songs", sources, which -> {
                     Intent intent = new Intent(which == 0 ? Intent.ACTION_OPEN_DOCUMENT : Intent.ACTION_OPEN_DOCUMENT_TREE);
                     intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
                     if (which == 0) {
@@ -415,7 +627,7 @@ public final class MainActivity extends Activity {
                     }
                     try { startActivityForResult(intent, which == 0 ? FILES : FOLDER); }
                     catch (Exception e) { toast("No file picker available"); }
-                }).show();
+                });
     }
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
@@ -433,7 +645,7 @@ public final class MainActivity extends Activity {
             toast("Scanning folder…");
             new Thread(() -> {
                 int count = scan(tree, DocumentsContract.getTreeDocumentId(tree), target, 0);
-                runOnUiThread(() -> { toast("Added " + count + " songs"); render(); });
+                runOnUiThread(() -> { playlistId = target; toast("Added " + count + " songs"); render(); });
             }).start();
         } else if (request == FILES) {
             int count = 0;
@@ -444,7 +656,7 @@ public final class MainActivity extends Activity {
             } else if (data.getData() != null) {
                 Uri uri = data.getData(); persist(uri); count += addDocument(target, uri);
             }
-            toast("Added " + count + " songs"); render();
+            playlistId = target; toast("Added " + count + " songs"); render();
         }
     }
     private void persist(Uri uri) {
@@ -482,8 +694,10 @@ public final class MainActivity extends Activity {
         return count;
     }
     private void startList(String id, int index) {
+        startSongs(store.list(id), index);
+    }
+    private void startSongs(List<LibraryStore.Song> songs, int index) {
         if (controller == null) { toast("Player is connecting…"); return; }
-        List<LibraryStore.Song> songs = store.list(id);
         if (songs.isEmpty()) { toast("This list is empty"); return; }
         List<MediaItem> items = new ArrayList<>(); List<String> ids = new ArrayList<>();
         for (LibraryStore.Song song : songs) { items.add(song.mediaItem()); ids.add(song.id); }
