@@ -23,6 +23,7 @@ public final class PlaybackService extends MediaSessionService {
     private ExoPlayer player;
     private MediaSession session;
     private LibraryStore store;
+    private boolean closingTask;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable checkpoint = new Runnable() {
         @Override public void run() { saveState(); handler.postDelayed(this, 3000); }
@@ -69,7 +70,7 @@ public final class PlaybackService extends MediaSessionService {
     }
 
     private void saveState() {
-        if (player == null) return;
+        if (player == null || closingTask) return;
         List<String> ids = new ArrayList<>();
         for (int i = 0; i < player.getMediaItemCount(); i++) ids.add(player.getMediaItemAt(i).mediaId);
         store.savePlayback(ids, player.getCurrentMediaItemIndex(), player.getCurrentPosition());
@@ -88,8 +89,14 @@ public final class PlaybackService extends MediaSessionService {
     }
 
     @Override public void onTaskRemoved(Intent rootIntent) {
-        if (player != null && player.isPlaying()) return;
-        super.onTaskRemoved(rootIntent);
+        // Save the resume point before clearing the player, which removes the media notification.
+        saveState();
+        closingTask = true;
+        if (player != null) {
+            player.stop();
+            player.clearMediaItems();
+        }
+        pauseAllPlayersAndStopSelf();
     }
 
     @Override public void onDestroy() {

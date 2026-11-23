@@ -338,7 +338,13 @@ public final class MainActivity extends Activity {
                 TextView label = text("≡   " + (i + 1) + ".  " + name, 14, WHITE, false);
                 label.setSingleLine(true); label.setEllipsize(android.text.TextUtils.TruncateAt.END);
                 line.addView(label, new LinearLayout.LayoutParams(0, dp(54), 1));
-                label.setOnClickListener(v -> controller.seekToDefaultPosition(index));
+                View.OnClickListener playFromQueue = v -> {
+                    if (controller == null) return;
+                    controller.seekToDefaultPosition(index);
+                    controller.play();
+                };
+                line.setOnClickListener(playFromQueue);
+                label.setOnClickListener(playFromQueue);
                 line.addView(more(v -> showQueueMenu(v, index, item)));
                 bindDrag(line, label, "queue", index, color,
                         (from, to) -> { if (controller != null) controller.moveMediaItem(from, to); });
@@ -471,9 +477,11 @@ public final class MainActivity extends Activity {
             LinearLayout line = cardRow(PANEL);
             TextView label = text("≡  ♫  " + song.title, 15, WHITE, false);
             label.setSingleLine(true); label.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            label.setOnClickListener(v -> startList(playlistId, index));
-            line.addView(label, new LinearLayout.LayoutParams(0, dp(56), 1));
             String listId = playlistId;
+            View.OnClickListener playFromList = v -> startList(listId, index);
+            line.setOnClickListener(playFromList);
+            label.setOnClickListener(playFromList);
+            line.addView(label, new LinearLayout.LayoutParams(0, dp(56), 1));
             line.addView(more(v -> showSongMenu(v, listId, song)));
             bindDrag(line, label, "songs:" + (listId == null ? "root" : listId), index, PANEL,
                     (from, to) -> store.move(listId, from, to));
